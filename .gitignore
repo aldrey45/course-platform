@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Env files (never commit real secrets)
+.env
+!.env.example
+
+# Laravel
+course-service/vendor/
+course-service/storage/*.key
+course-service/.env
+!course-service/.env.example
+
+# OS
+.DS_Store
+Thumbs.db

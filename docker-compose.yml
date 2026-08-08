@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  # ---------- Infrastructure ----------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  course-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: course_db
+      MYSQL_USER: course_user
+      MYSQL_PASSWORD: course_pass
+      MYSQL_ROOT_PASSWORD: root_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - course-db-data:/var/lib/mysql
+
+  enrollment-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: enrollment_db
+      POSTGRES_USER: enrollment_user
+      POSTGRES_PASSWORD: enrollment_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - enrollment-db-data:/var/lib/postgresql/data
+
+  # ---------- Services ----------
+  auth-service:
+    build: ./auth-service
+    env_file: ./auth-service/.env.example
+    ports:
+      - "3001:3001"
+
+  course-service:
+    build: ./course-service
+    env_file: ./course-service/.env.example
+    ports:
+      - "8000:8000"
+    depends_on:
+      - course-db
+    # NOTE: uncomment once Laravel is scaffolded and Dockerfile exists
+
+  enrollment-service:
+    build: ./enrollment-service
+    env_file: ./enrollment-service/.env.example
+    ports:
+      - "3002:3002"
+    depends_on:
+      - enrollment-db
+      - redis
+      - auth-service
+      - course-service
+
+  notification-service:
+    build: ./notification-service
+    env_file: ./notification-service/.env.example
+    ports:
+      - "3003:3003"
+    depends_on:
+      - redis
+
+  gateway:
+    build: ./gateway
+    env_file: ./gateway/.env.example
+    ports:
+      - "3000:3000"
+    depends_on:
+      - auth-service
+      - course-service
+      - enrollment-service
+
+volumes:
+  course-db-data:
+  enrollment-db-data:

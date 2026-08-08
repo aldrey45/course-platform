@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Detects which service folders changed in this push/PR.
+  # Downstream jobs only run if their folder is in the change set —
+  # this is the core monorepo CI pattern: don't test what didn't change.
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.filter.outputs.auth }}
+      enrollment: ${{ steps.filter.outputs.enrollment }}
+      notification: ${{ steps.filter.outputs.notification }}
+      gateway: ${{ steps.filter.outputs.gateway }}
+      course: ${{ steps.filter.outputs.course }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            auth:
+              - 'auth-service/**'
+            enrollment:
+              - 'enrollment-service/**'
+            notification:
+              - 'notification-service/**'
+            gateway:
+              - 'gateway/**'
+            course:
+              - 'course-service/**'
+
+  auth-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: auth-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: auth-service/package-lock.json
+      - run: npm install
+      - run: npm test
+
+  enrollment-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.enrollment == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enrollment-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: enrollment-service/package-lock.json
+      - run: npm install
+      - run: npm test
+
+  notification-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.notification == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notification-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: notification-service/package-lock.json
+      - run: npm install
+      - run: npm test
+
+  gateway:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.gateway == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gateway/package-lock.json
+      - run: npm install
+      - run: npm test
+
+  course-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.course == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: course-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - run: composer install --no-interaction --prefer-dist
+      - run: php artisan test
