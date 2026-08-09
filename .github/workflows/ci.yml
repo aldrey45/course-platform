@@ -116,4 +116,6 @@ jobs:
         with:
           php-version: '8.4'
       - run: composer install --no-interaction --prefer-dist
+      - run: cp .env.example .env
+      - run: php artisan key:generate
       - run: php artisan test
