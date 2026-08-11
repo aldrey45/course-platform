@@ -12,5 +12,8 @@
     "axios": "^1.7.2",
     "ioredis": "^5.4.1",
     "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
   }
 }
