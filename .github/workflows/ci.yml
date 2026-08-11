@@ -76,6 +76,22 @@ jobs:
     defaults:
       run:
         working-directory: notification-service
+    # A service container: GitHub Actions spins up a real Redis instance
+    # alongside the job, reachable at localhost:6379 for the duration of
+    # this job only. This is how you test something that genuinely needs
+    # a real dependency, instead of mocking it away.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
