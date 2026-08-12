@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ---------- Infrastructure ----------
   redis:
@@ -39,7 +37,7 @@ services:
 
   course-service:
     build: ./course-service
-    env_file: ./course-service/.env.example
+    env_file: ./course-service/.env
     ports:
       - "8000:8000"
     depends_on:
