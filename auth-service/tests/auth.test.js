@@ -1,7 +1,23 @@
 const test = require('node:test');
+const { before, beforeEach, after } = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
-const app = require('../src/index');
+
+const { app, migrate, pool } = require('../src/index');
+
+before(async () => {
+  await migrate();
+});
+
+// Real database now, so we clear it between tests instead of relying on
+// unique-per-test emails - keeps each test independent and repeatable.
+beforeEach(async () => {
+  await pool.query('DELETE FROM users');
+});
+
+after(async () => {
+  await pool.end();
+});
 
 test('health check', async () => {
   const res = await request(app).get('/health');
@@ -12,7 +28,7 @@ test('health check', async () => {
 test('register creates a new user', async () => {
   const res = await request(app).post('/auth/register').send({
     name: 'Test User',
-    email: `test-${Date.now()}@example.com`,
+    email: 'test@example.com',
     password: 'password123',
   });
   assert.strictEqual(res.status, 201);
@@ -23,7 +39,7 @@ test('register creates a new user', async () => {
 test('register rejects short password', async () => {
   const res = await request(app).post('/auth/register').send({
     name: 'Test User',
-    email: `test-${Date.now()}@example.com`,
+    email: 'test@example.com',
     password: 'short',
   });
   assert.strictEqual(res.status, 400);
@@ -31,28 +47,16 @@ test('register rejects short password', async () => {
 });
 
 test('register rejects duplicate email', async () => {
-  const email = `dup-${Date.now()}@example.com`;
-  await request(app).post('/auth/register').send({
-    name: 'First',
-    email,
-    password: 'password123',
-  });
-  const res = await request(app).post('/auth/register').send({
-    name: 'Second',
-    email,
-    password: 'password123',
-  });
+  const email = 'dup@example.com';
+  await request(app).post('/auth/register').send({ name: 'First', email, password: 'password123' });
+  const res = await request(app).post('/auth/register').send({ name: 'Second', email, password: 'password123' });
   assert.strictEqual(res.status, 409);
   assert.strictEqual(res.body.error.code, 'EMAIL_TAKEN');
 });
 
 test('login succeeds with correct credentials and returns a token', async () => {
-  const email = `login-${Date.now()}@example.com`;
-  await request(app).post('/auth/register').send({
-    name: 'Login Test',
-    email,
-    password: 'password123',
-  });
+  const email = 'login@example.com';
+  await request(app).post('/auth/register').send({ name: 'Login Test', email, password: 'password123' });
 
   const res = await request(app).post('/auth/login').send({ email, password: 'password123' });
   assert.strictEqual(res.status, 200);
@@ -60,12 +64,8 @@ test('login succeeds with correct credentials and returns a token', async () => 
 });
 
 test('login fails with wrong password', async () => {
-  const email = `wrongpass-${Date.now()}@example.com`;
-  await request(app).post('/auth/register').send({
-    name: 'Wrong Pass',
-    email,
-    password: 'password123',
-  });
+  const email = 'wrongpass@example.com';
+  await request(app).post('/auth/register').send({ name: 'Wrong Pass', email, password: 'password123' });
 
   const res = await request(app).post('/auth/login').send({ email, password: 'nottherightone' });
   assert.strictEqual(res.status, 401);
@@ -73,12 +73,8 @@ test('login fails with wrong password', async () => {
 });
 
 test('verify and me work with a valid token, reject without one', async () => {
-  const email = `verify-${Date.now()}@example.com`;
-  await request(app).post('/auth/register').send({
-    name: 'Verify Test',
-    email,
-    password: 'password123',
-  });
+  const email = 'verify@example.com';
+  await request(app).post('/auth/register').send({ name: 'Verify Test', email, password: 'password123' });
   const loginRes = await request(app).post('/auth/login').send({ email, password: 'password123' });
   const token = loginRes.body.token;
 

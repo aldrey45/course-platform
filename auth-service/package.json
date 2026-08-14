@@ -8,10 +8,11 @@
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3",
-    "dotenv": "^16.4.5"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "supertest": "^7.0.0"
