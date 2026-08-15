@@ -76,6 +76,22 @@ jobs:
     defaults:
       run:
         working-directory: enrollment-service
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: enrollment_db
+          POSTGRES_USER: enrollment_user
+          POSTGRES_PASSWORD: enrollment_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U enrollment_user -d enrollment_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://enrollment_user:enrollment_pass@localhost:5432/enrollment_db
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

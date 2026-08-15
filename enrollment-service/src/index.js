@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const Redis = require('ioredis');
 require('dotenv').config();
+const { pool, migrate } = require('./db');
 
 const app = express();
 app.use(express.json());
@@ -11,18 +12,11 @@ const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001'
 const COURSE_SERVICE_URL = process.env.COURSE_SERVICE_URL || 'http://localhost:8000';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// --- In-memory "database" ---
-// Same learning-project shortcut as auth-service: no persistence yet.
-const enrollments = []; // { id, userId, courseId, courseTitle, status, progress, enrolledAt }
-let nextId = 1;
-
 function errorResponse(res, status, code, message) {
   return res.status(status).json({ error: { code, message } });
 }
 
-// --- Redis publisher (for the async event step) ---
-// lazyConnect + an error handler so a missing/down Redis never crashes
-// the service or blocks a request - it just fails to publish, quietly.
+// --- Redis publisher (async event step) ---
 const redis = new Redis(REDIS_URL, { lazyConnect: true, retryStrategy: () => null });
 redis.on('error', (err) => {
   console.warn('[enrollment-service] Redis unavailable, events will not be published:', err.message);
@@ -41,7 +35,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'enrollment-service' });
 });
 
-// Verifies the caller's token against Auth Service (sync HTTP call #1).
+// Sync HTTP call #1 - confirm the caller's token is valid
 async function verifyToken(authHeader) {
   const response = await axios.get(`${AUTH_SERVICE_URL}/auth/verify`, {
     headers: { Authorization: authHeader },
@@ -71,8 +65,8 @@ app.post('/enrollments', async (req, res) => {
     return errorResponse(res, 502, 'AUTH_SERVICE_UNAVAILABLE', 'could not reach auth service');
   }
 
-  // Sync HTTP call #2 - confirm the course exists and grab its title
-  // for denormalized storage (see API-CONTRACTS.md design decisions).
+  // Sync HTTP call #2 - confirm the course exists, grab its title for
+  // denormalized storage (see API-CONTRACTS.md design decisions).
   let courseTitle;
   try {
     const courseRes = await axios.get(`${COURSE_SERVICE_URL}/api/courses/${courseId}/exists`);
@@ -87,16 +81,19 @@ app.post('/enrollments', async (req, res) => {
     return errorResponse(res, 502, 'COURSE_SERVICE_UNAVAILABLE', 'could not reach course service');
   }
 
-  const enrollment = {
-    id: String(nextId++),
-    userId: auth.userId,
-    courseId,
-    courseTitle,
-    status: 'active',
-    progress: 0,
-    enrolledAt: new Date().toISOString(),
-  };
-  enrollments.push(enrollment);
+  let enrollment;
+  try {
+    const result = await pool.query(
+      `INSERT INTO enrollments (user_id, course_id, course_title, status, progress)
+       VALUES ($1, $2, $3, 'active', 0)
+       RETURNING id, user_id AS "userId", course_id AS "courseId", course_title AS "courseTitle", status, progress, enrolled_at AS "enrolledAt"`,
+      [auth.userId, courseId, courseTitle]
+    );
+    enrollment = result.rows[0];
+  } catch (err) {
+    console.error('[enrollment-service] insert error:', err.message);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'something went wrong');
+  }
 
   // Async step - fire and forget, don't make the caller wait on Notification.
   publishEnrollmentCreated({
@@ -126,11 +123,17 @@ app.get('/enrollments/me', async (req, res) => {
     return errorResponse(res, 502, 'AUTH_SERVICE_UNAVAILABLE', 'could not reach auth service');
   }
 
-  const mine = enrollments
-    .filter((e) => e.userId === auth.userId)
-    .map((e) => ({ id: e.id, courseId: e.courseId, courseTitle: e.courseTitle, status: e.status, progress: e.progress }));
-
-  res.json(mine);
+  try {
+    const result = await pool.query(
+      `SELECT id, course_id AS "courseId", course_title AS "courseTitle", status, progress
+       FROM enrollments WHERE user_id = $1 ORDER BY id`,
+      [auth.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[enrollment-service] list error:', err.message);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'something went wrong');
+  }
 });
 
 // PATCH /enrollments/:id/progress
@@ -155,19 +158,36 @@ app.patch('/enrollments/:id/progress', async (req, res) => {
     return errorResponse(res, 502, 'AUTH_SERVICE_UNAVAILABLE', 'could not reach auth service');
   }
 
-  const enrollment = enrollments.find((e) => e.id === req.params.id && e.userId === auth.userId);
-  if (!enrollment) {
-    return errorResponse(res, 404, 'ENROLLMENT_NOT_FOUND', 'enrollment not found');
+  try {
+    const status = percent === 100 ? 'completed' : 'active';
+    const result = await pool.query(
+      `UPDATE enrollments SET progress = $1, status = $2, updated_at = now()
+       WHERE id = $3 AND user_id = $4
+       RETURNING id, progress`,
+      [percent, status, req.params.id, auth.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return errorResponse(res, 404, 'ENROLLMENT_NOT_FOUND', 'enrollment not found');
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[enrollment-service] progress update error:', err.message);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'something went wrong');
   }
-
-  enrollment.progress = percent;
-  if (percent === 100) enrollment.status = 'completed';
-
-  res.json({ id: enrollment.id, progress: enrollment.progress });
 });
 
-if (require.main === module) {
+async function start() {
+  await migrate();
   app.listen(PORT, () => console.log(`enrollment-service listening on ${PORT}`));
 }
 
-module.exports = app;
+if (require.main === module) {
+  start().catch((err) => {
+    console.error('[enrollment-service] failed to start:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { app, migrate, pool };

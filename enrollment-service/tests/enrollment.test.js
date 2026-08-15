@@ -1,14 +1,10 @@
 const test = require('node:test');
-const { before, after } = require('node:test');
+const { before, beforeEach, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
 
-let mockAuthServer, mockCourseServer, app, request;
+let mockAuthServer, mockCourseServer, app, migrate, pool, request;
 
-// Enrollment Service calls Auth and Course over real HTTP, so instead of
-// mocking axios itself, we spin up tiny real HTTP servers that stand in
-// for those two services. This tests the actual request/response contract,
-// not just that a function was called.
 before(async () => {
   mockAuthServer = http.createServer((req, res) => {
     if (req.url === '/auth/verify') {
@@ -41,17 +37,24 @@ before(async () => {
 
   process.env.AUTH_SERVICE_URL = `http://localhost:${mockAuthServer.address().port}`;
   process.env.COURSE_SERVICE_URL = `http://localhost:${mockCourseServer.address().port}`;
-  process.env.REDIS_URL = 'redis://localhost:1'; // deliberately unreachable - publish should fail silently
+  process.env.REDIS_URL = 'redis://localhost:1'; // deliberately unreachable
 
-  // Must require the app AFTER the env vars above are set, since
-  // enrollment-service reads them once at module load time.
-  app = require('../src/index');
+  // Must require the app AFTER the env vars above are set.
+  ({ app, migrate, pool } = require('../src/index'));
   request = require('supertest');
+
+  await migrate();
+});
+
+// Real database now - clear between tests instead of relying on unique IDs.
+beforeEach(async () => {
+  await pool.query('DELETE FROM enrollments');
 });
 
 after(async () => {
   mockAuthServer.close();
   mockCourseServer.close();
+  await pool.end();
 });
 
 test('health check', async () => {
@@ -81,7 +84,7 @@ test('enroll rejects a course that does not exist', async () => {
   assert.strictEqual(res.body.error.code, 'COURSE_NOT_FOUND');
 });
 
-test('enroll succeeds with valid token and existing course', async () => {
+test('enroll succeeds and persists to the database', async () => {
   const res = await request(app)
     .post('/enrollments')
     .set('Authorization', 'Bearer valid-token')
@@ -89,20 +92,27 @@ test('enroll succeeds with valid token and existing course', async () => {
   assert.strictEqual(res.status, 201);
   assert.strictEqual(res.body.courseTitle, 'Intro to Testing');
   assert.strictEqual(res.body.status, 'active');
+
+  const dbCheck = await pool.query('SELECT * FROM enrollments WHERE id = $1', [res.body.id]);
+  assert.strictEqual(dbCheck.rows.length, 1);
 });
 
-test('GET /enrollments/me lists the enrollment just created', async () => {
+test('GET /enrollments/me lists only the requesting user\'s enrollments', async () => {
+  await request(app).post('/enrollments').set('Authorization', 'Bearer valid-token').send({ courseId: 'course-1' });
+
   const res = await request(app).get('/enrollments/me').set('Authorization', 'Bearer valid-token');
   assert.strictEqual(res.status, 200);
   assert.ok(res.body.some((e) => e.courseId === 'course-1'));
 });
 
 test('PATCH progress updates and marks completed at 100', async () => {
-  const listRes = await request(app).get('/enrollments/me').set('Authorization', 'Bearer valid-token');
-  const enrollmentId = listRes.body[0].id;
+  const enrollRes = await request(app)
+    .post('/enrollments')
+    .set('Authorization', 'Bearer valid-token')
+    .send({ courseId: 'course-1' });
 
   const res = await request(app)
-    .patch(`/enrollments/${enrollmentId}/progress`)
+    .patch(`/enrollments/${enrollRes.body.id}/progress`)
     .set('Authorization', 'Bearer valid-token')
     .send({ percent: 100 });
 
