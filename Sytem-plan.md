@@ -165,3 +165,4 @@ being used yet.
 6. ⏳ Move Auth + Enrollment onto real databases (see section 3)
 7. ⏳ Circuit breaker on Enrollment → Course calls (resilience)
 8. ⏳ CD pipeline (build + push Docker images)
+9. testing tesing
