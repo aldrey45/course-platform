@@ -149,9 +149,34 @@ Issues actually hit while building this, in case they come back:
 
 - ✅ **CI**: `.github/workflows/ci.yml` — path-filtered per service, runs
   tests only for what changed. Notification Service's job spins up a real
-  Redis service container; Course Service's job uses SQLite in-memory.
-- ⏳ **CD**: not yet implemented. Natural next step: build + push Docker
-  images to a registry (e.g. GHCR) on merge to `main`, tagged per service.
+  Redis service container; Auth and Enrollment Services' jobs spin up real
+  Postgres service containers; Course Service's job uses SQLite in-memory.
+- ✅ **CD**: on every push to `main`, once a service's tests pass, its
+  Docker image is built and pushed to GitHub Container Registry (GHCR),
+  tagged both `latest` and with the commit SHA. Only runs for services
+  that actually changed (same path-filtering as CI) and only on `main`
+  pushes, never on pull requests.
+
+Published images live at:
+
+```
+ghcr.io/aldrey45/course-platform-auth-service
+ghcr.io/aldrey45/course-platform-enrollment-service
+ghcr.io/aldrey45/course-platform-notification-service
+ghcr.io/aldrey45/course-platform-gateway
+ghcr.io/aldrey45/course-platform-course-service
+```
+
+To pull and run a published image directly (instead of building locally):
+
+```bash
+docker pull ghcr.io/aldrey45/course-platform-auth-service:latest
+docker run -p 3001:3001 --env-file auth-service/.env.example ghcr.io/aldrey45/course-platform-auth-service:latest
+```
+
+(First push, images are private by default under your GitHub account's
+package settings — visit github.com/aldrey45?tab=packages to make one
+public if you want to pull it without authenticating.)
 
 ## Natural next steps
 
