@@ -20,10 +20,15 @@ Reference doc for all services before implementation. Update this first if a con
 
 | Method | Endpoint | Request Body | Response |
 |---|---|---|---|
-| POST | `/auth/register` | `{ name, email, password }` | `{ id, name, email }` |
-| POST | `/auth/login` | `{ email, password }` | `{ token, expiresIn }` |
-| GET | `/auth/verify` | Header: `Authorization: Bearer <token>` | `{ valid, userId, email }` — internal use by other services |
-| GET | `/auth/me` | Header: `Authorization: Bearer <token>` | `{ id, name, email }` |
+| POST | `/auth/register` | `{ name, email, password }` | `{ id, name, email, emailVerified }` — also sends (logs) an email verification link |
+| GET | `/auth/verify-email?token=...` | — | `{ verified: true }` — single-use, 24h expiry |
+| POST | `/auth/login` | `{ email, password }` | `{ accessToken, refreshToken, expiresIn, emailVerified }` |
+| POST | `/auth/refresh` | `{ refreshToken }` | `{ accessToken, refreshToken, expiresIn }` — rotates the refresh token; the old one stops working |
+| POST | `/auth/logout` | `{ refreshToken }` | `{ loggedOut: true }` — revokes the refresh token |
+| GET | `/auth/verify` | Header: `Authorization: Bearer <accessToken>` | `{ valid, userId, email }` — internal use by other services, unchanged |
+| GET | `/auth/me` | Header: `Authorization: Bearer <accessToken>` | `{ id, name, email, emailVerified }` |
+
+**Token lifetimes:** access tokens (JWT) expire in 15 minutes; refresh tokens (opaque, stored hashed) expire in 30 days and rotate on every use. Login is allowed regardless of `emailVerified` status — the client decides which features to gate behind it, rather than blocking login entirely.
 
 ---
 
