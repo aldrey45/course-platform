@@ -3,6 +3,7 @@ const axios = require('axios');
 const Redis = require('ioredis');
 require('dotenv').config();
 const { pool, migrate } = require('./db');
+const { checkCourseExists, breaker } = require('./courseServiceClient');
 
 const app = express();
 app.use(express.json());
@@ -67,16 +68,25 @@ app.post('/enrollments', async (req, res) => {
 
   // Sync HTTP call #2 - confirm the course exists, grab its title for
   // denormalized storage (see API-CONTRACTS.md design decisions).
+  // Wrapped in a circuit breaker: if Course Service is repeatedly failing
+  // or timing out, the breaker "opens" and this call fails fast instead
+  // of piling up slow/hanging requests against a service that's already
+  // struggling. See courseServiceClient.js for the breaker config.
   let courseTitle;
   try {
-    const courseRes = await axios.get(`${COURSE_SERVICE_URL}/api/courses/${courseId}/exists`);
-    if (!courseRes.data.exists) {
+    const courseResult = await checkCourseExists(courseId);
+    if (!courseResult.exists) {
       return errorResponse(res, 404, 'COURSE_NOT_FOUND', 'course does not exist');
     }
-    courseTitle = courseRes.data.title;
+    courseTitle = courseResult.title;
   } catch (err) {
-    if (err.response && err.response.status === 404) {
-      return errorResponse(res, 404, 'COURSE_NOT_FOUND', 'course does not exist');
+    if (breaker.opened) {
+      return errorResponse(
+        res,
+        503,
+        'COURSE_SERVICE_CIRCUIT_OPEN',
+        'course service is temporarily unavailable, please try again shortly'
+      );
     }
     return errorResponse(res, 502, 'COURSE_SERVICE_UNAVAILABLE', 'could not reach course service');
   }
@@ -190,4 +200,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, migrate, pool };
+module.exports = { app, migrate, pool, breaker };
